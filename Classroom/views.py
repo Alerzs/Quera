@@ -1,5 +1,7 @@
 from rest_framework import generics
 from .models import *
+import requests
+import json
 from Bank.models import Soal
 from Bank.models import *
 from auth_user.models import *
@@ -12,6 +14,7 @@ from django.db.models import Count ,Q
 from django.shortcuts import get_object_or_404
 from .serializers import *
 from Bank.views import SoalView
+from Bank.serializers import SoalSerializer
 
 
 class Classview(APIView):
@@ -216,11 +219,17 @@ class AddGroup(APIView):
     def patch(self ,request ,shenase):
         group_list = request.data.get('group_list',[])
         assignment_id = request.data.get('assignment_id')
+        number_of_random_groups = request.data.get('number_of_random_groups')
 
         my_assignment = get_object_or_404(Assignment, id=assignment_id)
         my_user = request.user
         my_class = get_object_or_404(Classes ,shenase=shenase)
-
+        
+        if number_of_random_groups:
+            attendence = ClassRoles.objects.filter(kelas=my_class,role='S')
+            if len(attendence) < 2 * number_of_random_groups:
+                return Response("each grop must have at least 2 members")
+            #---------------------------------------------------------------------------not completed
         if len(group_list) > 10:
             return Response('maximum number of groups is 10' ,status=status.HTTP_400_BAD_REQUEST)
         if my_assignment.for_class != my_class:
@@ -290,19 +299,118 @@ class AddQuestionFromBank(APIView):
 
 class AddCreatedQuestion(APIView):
     permission_classes = [IsAuthenticated]
-    def get(self ,request):
-        view = SoalView.as_view()
-        responce = view(request)
-        return Response(responce.data)
-                
+    def post(self ,request ,shenase):
+        assignment_id = request.data.get('assignment_id')
+        deadline = request.data.get('deadline')
+        send_limit = request.data.get('send_limit')
+        mark = request.data.get('mark')
+        late_penalty = request.data.get('late_penalty')
+
+        if not assignment_id or not deadline or not send_limit or not mark or not late_penalty:
+            return Response("assignment_id , deadline , send_limit , mark and late_penalty are required")
+        my_assignment = get_object_or_404(Assignment, id=assignment_id)
+         
+        my_user = request.user
+        my_class = get_object_or_404(Classes ,shenase=shenase)
+        serializer = SoalSerializer(data=request.data, context={'request': request})
+        if serializer.is_valid():
+            serializer.save() 
+            my_soal = serializer.instance
+            if my_assignment.for_class != my_class:
+                return Response("no permission", status=status.HTTP_403_FORBIDDEN)
+            try:
+                if ClassRoles.objects.get(user=my_user ,kelas=my_class).role == 'S':
+                    return Response("students dont have permission to add group",status=status.HTTP_403_FORBIDDEN)
+            except:
+                return Response("no permission", status=status.HTTP_403_FORBIDDEN)
+            
+            my_question = my_assignment.questions.create(soal=my_soal,deadline=deadline,send_limit=send_limit,mark=mark,late_penalty=late_penalty)
+            serializer = QuestionSerializer(my_question)
+            return Response(serializer.data ,status=status.HTTP_201_CREATED)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 
-        
+class QuestionView(APIView):
+    permission_classes = [IsAuthenticated]
+    def get(self ,request ,shenase ,assignment_id):
+        my_assignment = get_object_or_404(Assignment ,id = assignment_id)
+        my_user = request.user
+        my_class = get_object_or_404(Classes ,shenase=shenase)
+        my_question = Question.objects.filter(assignment=my_assignment)
+        if my_assignment.for_class != my_class:
+            return Response("assignment is not for class", status=status.HTTP_403_FORBIDDEN)
+        if not ClassRoles.objects.filter(user=my_user,kelas=my_class).exists():
+            return Response("user is not part of the class" ,status=status.HTTP_403_FORBIDDEN)
+        serializer = QuestionSerializer(my_question ,many=True)
+        return Response(serializer.data ,status=status.HTTP_200_OK)
+    
+    def post(self ,request ,shenase ,assignment_id ,question_id):
+        my_user = request.user
+        my_class = get_object_or_404(Classes ,shenase=shenase)
+        my_assignment = get_object_or_404(Assignment ,id=assignment_id)
+        my_question = get_object_or_404(Question ,id =question_id)
+        my_soal = my_question.soal
+        if not my_assignment.questions.exists(my_question):
+            return Response("question not for assignment")
+        if my_assignment.for_class != my_class:
+            return Response("assignmnet not for class")
+        if not ClassRoles.objects.filter(user=my_user,kelas=my_class).exists():
+            return Response("user is not member of the class")
+        if my_question.soal.answer_type == 'F':  
+            pass
+        if my_question.soal.answer_type == 'C':
+            code = request.data.get("code")
+            language = request.data.get("language")
+            version = request.data.get("version")
+            if not version or not language or not code:
+                return Response('code , version and language are required')
+            my_submit = SubmitedAnswer.objects.create(user=my_user,soal=my_soal,submited_code=code)
+            result = ""
+            solution = my_soal.test_case_answer.split(',')
+            correct_count = 0
+            for index , test in enumerate(my_soal.test_case.split(',')):
+                my_data = {
+                    "clientId":"a7635a08ebc4743dc3e11dc40c2665c9",
+                    "clientSecret":"9306508b9b470f9a53d50f8465688bd2622da9d98053b260093ed27106e5f409",
+                    "script":code,
+                    "stdin":test,
+                    "language":language,
+                    "versionIndex":version
+                }
+                res = json.loads(requests.post("https://api.jdoodle.com/v1/execute",json=my_data).content.decode('utf-8'))
+                if solution[index] == res["output"]:
+                    correct_count += 1
+                if res["isExecutionSuccess"]:
+                    result = result + res["output"] + ","
+                else:
+                    result = "error,"
+            my_submit.result = result
+            try:
+                my_submit.mark = len(solution) // correct_count
+            except:
+                my_submit.mark = 0
+            my_submit.save()
+            if my_assignment.marking_type == 'J':
+                my_score = Scores.objects.create(user=my_user,question=my_question,taken_mark=my_submit.mark*my_question.mark)
+                return Response(my_score.taken_mark ,status=status.HTTP_200_OK)
+            my_score = Scores.objects.create(user=my_user,question=my_question)
+            return Response("answer was submited",status=status.HTTP_200_OK)
+        if my_question.soal.answer_type == 'F':
+            file = request.data.get('file')
+            if file:
+                SubmitedAnswer.objects.create(user=my_user,soal=my_soal,submited_file=file)
+                my_score = Scores.objects.create(user=my_user,question=my_question)
+                return Response("your answer is submited",status=status.HTTP_201_CREATED)
+            return Response("file is missing",status=status.HTTP_400_BAD_REQUEST)
+            
+
+
+            
 
 
 
 
-        
+            
 
     
 

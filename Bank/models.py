@@ -1,6 +1,7 @@
 from django.db import models
 from auth_user.models import QueraUser
 from rest_framework.exceptions import ValidationError
+from django.core.validators import MinValueValidator , MaxValueValidator
 
 class Soal(models.Model):
 
@@ -43,23 +44,21 @@ class Soal(models.Model):
 class SubmitedAnswer(models.Model):
     user = models.ForeignKey(QueraUser ,on_delete=models.CASCADE)
     soal = models.ForeignKey(Soal ,on_delete=models.CASCADE)
-    submited_file = models.FileField(blank=True ,null=True)
+    submited_file = models.FileField(blank=True ,null=True ,upload_to='uploads/')
     submited_code = models.TextField(blank=True ,null=True)
-    submited_text = models.TextField(blank=True ,null=True)
     result = models.TextField(editable=False ,blank=True ,null=True)
+    mark = models.PositiveIntegerField(validators=[MinValueValidator(0),MaxValueValidator(100)],editable=False ,blank=True ,null=True)
     
 
     def clean(self) -> None:
-        if self.soal.answer_type == 'C' and (self.submited_file is not None or self.submited_text is not None):
+        if self.soal.answer_type == 'C' and (self.submited_file != None):
             raise ValidationError("code answering type needs submited_code only")
-        if self.soal.answer_type == 'F' and (self.submited_code is not None or self.submited_text is not None):
+        if self.soal.answer_type == 'F' and (self.submited_code != None):
             raise ValidationError("file answering type needs submited_file only")
-        if self.soal.answer_type == 'T' and (self.submited_file is not None or self.submited_code is not None):
-            raise ValidationError("text answering type needs submited_text only")
+
     
     def save(self, *args, **kwargs):
         self.clean()
-        # api to a site and put the results in self.results fields
         super().save(*args, **kwargs)
 
 
