@@ -60,8 +60,6 @@ class Solve(APIView):
                 "language":language,
                 "versionIndex":version
             }
-            
-
             res = json.loads(requests.post("https://api.jdoodle.com/v1/execute",json=my_data).content.decode('utf-8'))
             if solution[index] == res["output"]:
                 correct_count += 1
@@ -79,6 +77,7 @@ class Solve(APIView):
 
 
 class SolveFile(APIView):
+    permission_classes = [IsAuthenticated]
     parser_classes = (MultiPartParser, FormParser)
     def post(self ,request):
         my_user = request.user
@@ -87,8 +86,8 @@ class SolveFile(APIView):
         my_soal = get_object_or_404(Soal ,id=soal_id)
         if my_soal.answer_type != 'F':
             return Response("code is not allowed for text andfile ansering types")
-        SubmitedAnswer.objects.create(user=my_user,soal=my_soal,submited_file=file)
         if file:
+            SubmitedAnswer.objects.create(user=my_user,soal=my_soal,submited_file=file)
             return Response("your answer is submited",status=status.HTTP_201_CREATED)
         return Response("file is missing",status=status.HTTP_400_BAD_REQUEST)
         

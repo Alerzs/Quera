@@ -105,6 +105,9 @@ class Scores(models.Model):
 class Team(models.Model):
     members = models.ManyToManyField(QueraUser)
 
+    def __str__(self) -> str:
+        return ", ".join(member.username for member in self.members.all())
+
 
 
 class Assignment(models.Model):

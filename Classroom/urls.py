@@ -14,4 +14,5 @@ urlpatterns = [
     path('add_group/<str:shenase>' ,AddGroup.as_view()),
     path('add_question/<str:shenase>' ,AddQuestionFromBank.as_view()),
     path('add_create_question/<str:shenase>' ,AddCreatedQuestion.as_view()),
+    path('question/<str:shenase>/<assignment_id>/<question_id>' ,QuestionView.as_view()),
 ]

@@ -1,5 +1,6 @@
 from rest_framework import generics
 from .models import *
+import random
 import requests
 import json
 from Bank.models import Soal
@@ -13,6 +14,7 @@ from django.utils.crypto import get_random_string
 from django.db.models import Count ,Q
 from django.shortcuts import get_object_or_404
 from .serializers import *
+from Bank.serializers import SubmitionSerializer
 from Bank.views import SoalView
 from Bank.serializers import SoalSerializer
 
@@ -224,12 +226,9 @@ class AddGroup(APIView):
         my_assignment = get_object_or_404(Assignment, id=assignment_id)
         my_user = request.user
         my_class = get_object_or_404(Classes ,shenase=shenase)
-        
-        if number_of_random_groups:
-            attendence = ClassRoles.objects.filter(kelas=my_class,role='S')
-            if len(attendence) < 2 * number_of_random_groups:
-                return Response("each grop must have at least 2 members")
-            #---------------------------------------------------------------------------not completed
+
+        if my_assignment.contribution_type == "I":
+            return Response("creating groups is not allowed in individual contribution type", status=status.HTTP_400_BAD_REQUEST)
         if len(group_list) > 10:
             return Response('maximum number of groups is 10' ,status=status.HTTP_400_BAD_REQUEST)
         if my_assignment.for_class != my_class:
@@ -239,6 +238,20 @@ class AddGroup(APIView):
                 return Response("students dont have permission to add group",status=status.HTTP_403_FORBIDDEN)
         except:
             return Response("no permission", status=status.HTTP_403_FORBIDDEN)
+        
+        if number_of_random_groups:
+            attendence = ClassRoles.objects.filter(kelas=my_class,role='S')
+            if len(attendence) < 2 * number_of_random_groups:
+                return Response("each grop must have at least 2 members", status=status.HTTP_400_BAD_REQUEST)
+            for _ in range(number_of_random_groups):
+                std = random.sample(list(attendence),k=len(attendence)//number_of_random_groups)
+                my_team = Team.objects.create()
+                for item in std:
+                    my_team.members.add(item.user)
+                    attendence = attendence.exclude(id=item.pk)
+                my_assignment.teams.set(my_team)
+                number_of_random_groups -= 1
+            return Response("group was created" ,status=status.HTTP_201_CREATED)
         
         combined_lists = [item for lst in group_list for item in lst]
         seen = set()
@@ -254,7 +267,7 @@ class AddGroup(APIView):
             if duplicates:
                 return Response({"Duplicate values found.": list(duplicates)})
         except:
-            return Response(f"no user found with {value} value")
+            return Response(f"no user found with {value} value", status=status.HTTP_400_BAD_REQUEST)
 
         my_assignment.teams.clear()
         for team in group_list:
@@ -332,7 +345,9 @@ class AddCreatedQuestion(APIView):
 
 class QuestionView(APIView):
     permission_classes = [IsAuthenticated]
-    def get(self ,request ,shenase ,assignment_id):
+    
+    def get(self ,request ,shenase ,assignment_id ,question_id):
+        my_question = get_object_or_404(Question ,id =question_id)
         my_assignment = get_object_or_404(Assignment ,id = assignment_id)
         my_user = request.user
         my_class = get_object_or_404(Classes ,shenase=shenase)
@@ -345,25 +360,29 @@ class QuestionView(APIView):
         return Response(serializer.data ,status=status.HTTP_200_OK)
     
     def post(self ,request ,shenase ,assignment_id ,question_id):
+
         my_user = request.user
         my_class = get_object_or_404(Classes ,shenase=shenase)
         my_assignment = get_object_or_404(Assignment ,id=assignment_id)
         my_question = get_object_or_404(Question ,id =question_id)
         my_soal = my_question.soal
-        if not my_assignment.questions.exists(my_question):
+        if my_question not in my_assignment.questions.all():
             return Response("question not for assignment")
         if my_assignment.for_class != my_class:
             return Response("assignmnet not for class")
         if not ClassRoles.objects.filter(user=my_user,kelas=my_class).exists():
             return Response("user is not member of the class")
-        if my_question.soal.answer_type == 'F':  
-            pass
+        if my_question.soal.answer_type == 'F': 
+            file = request.data.get('file')
+            if file:
+                SubmitedAnswer.objects.create(user=my_user,soal=my_soal,submited_file=file)
+                Scores.objects.create(student=my_user,question=my_question)
+                return Response("your answer is submited",status=status.HTTP_201_CREATED)
+            return Response("file is missing",status=status.HTTP_400_BAD_REQUEST)
         if my_question.soal.answer_type == 'C':
             code = request.data.get("code")
             language = request.data.get("language")
             version = request.data.get("version")
-            if not version or not language or not code:
-                return Response('code , version and language are required')
             my_submit = SubmitedAnswer.objects.create(user=my_user,soal=my_soal,submited_code=code)
             result = ""
             solution = my_soal.test_case_answer.split(',')
@@ -391,7 +410,7 @@ class QuestionView(APIView):
                 my_submit.mark = 0
             my_submit.save()
             if my_assignment.marking_type == 'J':
-                my_score = Scores.objects.create(user=my_user,question=my_question,taken_mark=my_submit.mark*my_question.mark)
+                my_score = Scores.objects.create(student=my_user,question=my_question,taken_mark=my_submit.mark*my_question.mark)
                 return Response(my_score.taken_mark ,status=status.HTTP_200_OK)
             my_score = Scores.objects.create(user=my_user,question=my_question)
             return Response("answer was submited",status=status.HTTP_200_OK)
@@ -402,7 +421,28 @@ class QuestionView(APIView):
                 my_score = Scores.objects.create(user=my_user,question=my_question)
                 return Response("your answer is submited",status=status.HTTP_201_CREATED)
             return Response("file is missing",status=status.HTTP_400_BAD_REQUEST)
-            
+
+class GiveMark(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self ,request ,shenase ,assignment_id):
+        my_user = request.user
+        my_class = get_object_or_404(Classes ,shenase=shenase)
+        my_assignment = get_object_or_404(Assignment ,id=assignment_id)
+        if my_assignment.for_class != my_class:
+            return Response("assignmnet not for class")
+        if not ClassRoles.objects.filter(user=my_user,kelas=my_class).exists():
+            return Response("user is not member of the class")
+        my_students = ClassRoles.objects.filter(kelas=my_class,role='S')
+        my_soal = Soal.objects.filter(question__assignment=my_assignment)
+        all_submitions = SubmitedAnswer.objects.filter(user=my_students,soal=my_soal)
+        serializer = SubmitionSerializer(all_submitions,many=True)
+        return Response(serializer.data ,status=status.HTTP_200_OK)
+    
+    def post(self ,request ,shenase ,assignment_id):
+        pass
+    
+    
 
 
             

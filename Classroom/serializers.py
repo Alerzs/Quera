@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import Classes ,ClassRoles ,Assignment ,Question
+from .models import Classes ,ClassRoles ,Assignment ,Question ,Team 
 
 
 
@@ -45,6 +45,7 @@ class ClassSerializer(serializers.ModelSerializer):
 class AssignmentSerializer(serializers.ModelSerializer):
     
     for_class = serializers.StringRelatedField()
+    # teams = serializers.SlugRelatedField(many=True ,slug_field = 'querauser',queryset=Team.objects.all())
     
     class Meta:
         model = Assignment
@@ -58,3 +59,4 @@ class QuestionSerializer(serializers.ModelSerializer):
     class Meta:
         model = Question
         exclude = ['id']
+
