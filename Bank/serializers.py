@@ -31,8 +31,10 @@ class SoalSerializer(serializers.ModelSerializer):
         validated_data['creator'] = self.context['request'].user
         return super().create(validated_data)
     
-class SubmitionSerializer(serializers.Serializer):
+class SubmitionSerializer(serializers.ModelSerializer):
 
+    user = serializers.StringRelatedField()
+    soal = serializers.StringRelatedField()
     class Meta:
         model = SubmitedAnswer
         fields = ['id','user','soal','submited_code']

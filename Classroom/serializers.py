@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import Classes ,ClassRoles ,Assignment ,Question ,Team 
+from .models import Classes ,ClassRoles ,Assignment ,Question ,Team ,Scores
 
 
 
@@ -60,3 +60,7 @@ class QuestionSerializer(serializers.ModelSerializer):
         model = Question
         exclude = ['id']
 
+class ScoreSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Scores
+        exclude = ['id']

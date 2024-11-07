@@ -347,7 +347,7 @@ class QuestionView(APIView):
     permission_classes = [IsAuthenticated]
     
     def get(self ,request ,shenase ,assignment_id ,question_id):
-        my_question = get_object_or_404(Question ,id =question_id)
+        
         my_assignment = get_object_or_404(Assignment ,id = assignment_id)
         my_user = request.user
         my_class = get_object_or_404(Classes ,shenase=shenase)
@@ -431,16 +431,55 @@ class GiveMark(APIView):
         my_assignment = get_object_or_404(Assignment ,id=assignment_id)
         if my_assignment.for_class != my_class:
             return Response("assignmnet not for class")
-        if not ClassRoles.objects.filter(user=my_user,kelas=my_class).exists():
-            return Response("user is not member of the class")
-        my_students = ClassRoles.objects.filter(kelas=my_class,role='S')
+        if not ClassRoles.objects.filter(user=my_user,kelas=my_class).exclude(role='S').exists():
+            return Response("yo dont have permision to see submitions")
+        my_students = QueraUser.objects.filter(classroles__kelas=my_class,classroles__role='S')
         my_soal = Soal.objects.filter(question__assignment=my_assignment)
-        all_submitions = SubmitedAnswer.objects.filter(user=my_students,soal=my_soal)
+        all_submitions = SubmitedAnswer.objects.filter(user__in=my_students,soal__in=my_soal)
+        for item in all_submitions:
+            if not Scores.objects.filter(student=item.user ,question__soal=item.soal).exists():
+                all_submitions.exclude(item)
         serializer = SubmitionSerializer(all_submitions,many=True)
         return Response(serializer.data ,status=status.HTTP_200_OK)
     
     def post(self ,request ,shenase ,assignment_id):
-        pass
+        mark = request.data.get('mark')
+        student_username = request.data.get('student_username')
+        question_name = request.data.get('question_name')
+        my_user = request.user
+        my_class = get_object_or_404(Classes ,shenase=shenase)
+        my_assignment = get_object_or_404(Assignment ,id=assignment_id)
+        if my_assignment.marking_type == 'J':
+            return Response("this assignment is marked by judge")
+        if my_assignment.for_class != my_class:
+            return Response("assignmnet not for class")
+        if not ClassRoles.objects.filter(user=my_user,kelas=my_class).exclude(role='S').exists():
+            return Response("yo dont have permision to give marks")
+        my_student = get_object_or_404(QueraUser ,username=student_username)
+        my_question = get_object_or_404(Question ,soal__name=question_name)
+        my_score = Scores.objects.get(question=my_question,student=my_student)
+        my_score.taken_mark = mark
+        my_score.save()
+        serializer = ScoreSerializer(my_score)
+        return Response(serializer.data)
+    
+
+class ScoreBoard(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self ,request ,shenase ,assignment_id):
+        my_user = request.user
+        my_class = get_object_or_404(Classes ,shenase=shenase)
+        my_assignment = get_object_or_404(Assignment ,id=assignment_id)
+        my_questions = Question.objects.filter(assignment=my_assignment)
+        my_students = QueraUser.objects.filter(classroles__role='S',classroles__kelas=my_class)
+        all_scores = Scores.objects.filter(student__in=my_students ,question__in=my_questions)
+        serializer = ScoreSerializer(all_scores)
+        print(all_scores)
+        return Response(serializer.data)
+
+        
+        
     
     
 
